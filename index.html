@@ -39,9 +39,16 @@
             font-family: 'Courier New', Courier, monospace;
             resize: none;
         }
-        .preview {
-            background-color: white;
-            position: relative;
+        .editor.hidden, .preview.hidden {
+            display: none;
+        }
+        .editor-container.editor-only .editor,
+        .editor-container.preview-only .preview {
+            flex: 1;
+        }
+        .editor-container.editor-only .preview,
+        .editor-container.preview-only .editor {
+            display: none;
         }
         .button-container {
             margin-bottom: 20px;
@@ -131,15 +138,18 @@
             <button @click="formatMarkdown">Format Markdown</button>
             <button @click="exportToPDF">Print to PDF</button>
             <button @click="copyHTMLToClipboard" class="secondary">Copy HTML</button>
+            <button @click="toggleEditor" :class="{active: showEditor}" class="secondary">Toggle Editor</button>
+            <button @click="togglePreview" :class="{active: showPreview}" class="secondary">Toggle Preview</button>
         </div>
         
-        <div class="editor-container">
+        <div class="editor-container" :class="{editorOnly: showEditor && !showPreview, previewOnly: !showEditor && showPreview}">
             <textarea 
+                v-show="showEditor"
                 class="editor" 
                 v-model="markdownText" 
                 @input="updatePreview" 
                 placeholder="Write your markdown here..."></textarea>
-            <div class="preview" v-html="htmlOutput"></div>
+            <div v-show="showPreview" class="preview" v-html="htmlOutput"></div>
         </div>
         
         <footer>
@@ -158,6 +168,8 @@
             setup() {
                 const markdownText = ref(`# Hello World\n\nThis is a **markdown** editor.\n\n## Features\n\n- Live preview\n- Syntax highlighting\n- Export to PDF\n- Mermaid diagrams\n\n\`\`\`javascript\nconsole.log('Hello World');\n\`\`\`\n\n\`\`\`mermaid\ngraph TD\n    A[Start] --> B{Is it working?}\n    B -- Yes --> C[Great!]\n    B -- No --> D[Debug]\n    D --> B\n\`\`\``);
                 const htmlOutput = ref('');
+                const showEditor = ref(true);
+                const showPreview = ref(true);
                 
                 // Configure marked with highlight.js and mermaid for syntax highlighting
                 const configureMarked = () => {
@@ -181,19 +193,27 @@
 
                 const renderMermaid = () => {
                     return new Promise((resolve) => {
-                        // Clear any existing diagrams first
-                        const mermaidDivs = document.querySelectorAll('.mermaid');
-                        mermaidDivs.forEach((element) => {
-                            element.innerHTML = element.textContent;
-                        });
-                        
-                        // Re-render all diagrams
-                        mermaid.run({
-                            nodes: mermaidDivs,
-                            suppressErrors: false
-                        }).then(() => {
+                        try {
+                            // Clear any existing diagrams first
+                            const mermaidDivs = document.querySelectorAll('.mermaid');
+                            mermaidDivs.forEach((element) => {
+                                element.innerHTML = element.textContent;
+                            });
+                            
+                            // Re-render all diagrams
+                            mermaid.run({
+                                nodes: mermaidDivs,
+                                suppressErrors: true
+                            }).then(() => {
+                                resolve();
+                            }).catch((err) => {
+                                console.warn('Mermaid rendering warning:', err);
+                                resolve();
+                            });
+                        } catch (err) {
+                            console.warn('Mermaid rendering error:', err);
                             resolve();
-                        });
+                        }
                     });
                 };
                 
@@ -241,12 +261,49 @@
                 const exportToPDF = async () => {
                     const printContainer = document.getElementById('print-container');
                     
-                    // Fill the print container with content
-                    printContainer.innerHTML = htmlOutput.value;
+                    // Parse the markdown fresh to get HTML with mermaid code blocks
+                    const freshHTML = marked.parse(markdownText.value);
                     
-                    // Wait for Mermaid diagrams to render in the print container
+                    // Fill the print container with fresh content
+                    printContainer.innerHTML = freshHTML;
+                    
+                    // Wait for DOM update
                     await Vue.nextTick();
-                    await renderMermaid();
+                    
+                    // Add print styles to the container
+                    printContainer.style.display = 'block';
+                    printContainer.style.visibility = 'visible';
+                    
+                    // Now render mermaid diagrams specifically in the print container
+                    const mermaidDivs = printContainer.querySelectorAll('.mermaid');
+                    
+                    if (mermaidDivs.length > 0) {
+                        mermaidDivs.forEach((element) => {
+                            element.innerHTML = element.textContent;
+                        });
+                        
+                        try {
+                            // Render the diagrams with error suppression
+                            await mermaid.run({
+                                nodes: mermaidDivs,
+                                suppressErrors: true
+                            });
+                        } catch (err) {
+                            console.warn('Mermaid rendering warning during export:', err);
+                        }
+                    }
+                    
+                    // Add delay to ensure all rendering is complete
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    // Clear the container after print dialog closes
+                    const afterPrintHandler = () => {
+                        printContainer.innerHTML = '';
+                        printContainer.style.display = 'none';
+                        window.removeEventListener('afterprint', afterPrintHandler);
+                    };
+                    
+                    window.addEventListener('afterprint', afterPrintHandler);
                     
                     // Use browser print functionality
                     window.print();
@@ -274,6 +331,14 @@
                     }
                 };
                 
+                const toggleEditor = () => {
+                    showEditor.value = !showEditor.value;
+                };
+                
+                const togglePreview = () => {
+                    showPreview.value = !showPreview.value;
+                };
+                
                 onMounted(async () => {
                     configureMarked();
                     // Initialize mermaid with more comprehensive configuration
@@ -281,9 +346,12 @@
                         startOnLoad: true,
                         theme: 'default',
                         securityLevel: 'loose',
+                        suppressErrors: true,
                         flowchart: {
-                            htmlLabels: true,
-                            curve: 'basis'
+                            htmlLabels: false,
+                            curve: 'linear',
+                            nodeSpacing: 50,
+                            rankSpacing: 50
                         },
                         sequence: {
                             showSequenceNumbers: true
@@ -302,10 +370,14 @@
                 return {
                     markdownText,
                     htmlOutput,
+                    showEditor,
+                    showPreview,
                     updatePreview,
                     formatMarkdown,
                     exportToPDF,
-                    copyHTMLToClipboard
+                    copyHTMLToClipboard,
+                    toggleEditor,
+                    togglePreview
                 };
             }
         }).mount('#app');
