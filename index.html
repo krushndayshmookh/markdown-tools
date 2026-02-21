@@ -7,6 +7,8 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10.8.0/dist/mermaid.min.js"></script>
+    <script src="https://unpkg.com/prettier@3/standalone.js"></script>
+    <script src="https://unpkg.com/prettier@3/parser-html.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
     <style>
@@ -128,6 +130,7 @@
         <div class="button-container">
             <button @click="formatMarkdown">Format Markdown</button>
             <button @click="exportToPDF">Print to PDF</button>
+            <button @click="copyHTMLToClipboard" class="secondary">Copy HTML</button>
         </div>
         
         <div class="editor-container">
@@ -249,6 +252,28 @@
                     window.print();
                 };
                 
+                const copyHTMLToClipboard = async (event) => {
+                    try {
+                        // Format the HTML using Prettier
+                        const formattedHTML = await prettier.format(htmlOutput.value, {
+                            parser: 'html',
+                            plugins: [prettierPlugins.html]
+                        });
+                        
+                        await navigator.clipboard.writeText(formattedHTML);
+                        // Visual feedback
+                        const button = event.target;
+                        const originalText = button.textContent;
+                        button.textContent = 'Copied!';
+                        setTimeout(() => {
+                            button.textContent = originalText;
+                        }, 2000);
+                    } catch (err) {
+                        console.error('Failed to copy HTML:', err);
+                        alert('Failed to copy HTML to clipboard');
+                    }
+                };
+                
                 onMounted(async () => {
                     configureMarked();
                     // Initialize mermaid with more comprehensive configuration
@@ -279,7 +304,8 @@
                     htmlOutput,
                     updatePreview,
                     formatMarkdown,
-                    exportToPDF
+                    exportToPDF,
+                    copyHTMLToClipboard
                 };
             }
         }).mount('#app');
